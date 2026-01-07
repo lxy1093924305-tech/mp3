@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>H5 交互演示</title>
+    <style>
+        /* CSS 样式部分 */
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden; /* 防止出现滚动条 */
+            background-color: #333;
+            font-family: sans-serif;
+        }
+
+        /* 背景容器 */
+        #container {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden;
+        }
+
+        /* 可缩放拖拽的背景图 */
+        #bg-image {
+            /* 替换为您想要的背景图 URL */
+            background-image: url('https://images.unsplash.com/photo-1579546929518-9e396f3cc809?ixlib=rb-1.2.1&auto=format&fit=crop&w=1000&q=80'); 
+            background-size: cover;
+            background-position: center;
+            width: 100%; /* 初始宽度 */
+            height: 100%; /* 初始高度 */
+            transform-origin: center center; /* 从中心缩放 */
+            /* 关键：使用 transform 进行硬件加速，流畅度更高 */
+            will-change: transform; 
+        }
+
+        /* 悬浮 UI 层 (确保按钮永远在图片上方) */
+        .ui-layer {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none; /* 让点击穿透空白区域，不影响拖拽背景 */
+            z-index: 100;
+        }
+
+        /* 通用按钮样式 */
+        .btn {
+            pointer-events: auto; /* 恢复按钮的点击响应 */
+            background: rgba(255, 255, 255, 0.8);
+            border-radius: 50%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        .btn:active {
+            transform: scale(0.9);
+        }
+
+        /* 音乐按钮 */
+        #music-btn {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            width: 50px;
+            height: 50px;
+        }
+        /* 音乐播放时的动画 */
+        .playing {
+            animation: spin 3s linear infinite;
+            background: #4CAF50 !important; /* 播放变绿 */
+        }
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        /* 页面跳转按钮 */
+        #jump-btn {
+            position: absolute;
+            bottom: 50px;
+            left: 50%;
+            transform: translateX(-50%); /* 水平居中 */
+            padding: 12px 30px;
+            border-radius: 30px; /* 胶囊形状 */
+            background: #007AFF;
+            color: white;
+            font-weight: bold;
+            text-decoration: none;
+            pointer-events: auto;
+        }
+
+    </style>
+</head>
+<body>
+
+    <div id="container">
+        <div id="bg-image"></div>
+    </div>
+
+    <div class="ui-layer">
+        <div id="music-btn" class="btn">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#333" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M9 18V5l12-2v13"></path>
+                <circle cx="6" cy="18" r="3"></circle>
+                <circle cx="18" cy="16" r="3"></circle>
+            </svg>
+        </div>
+
+        <a href="https://www.google.com" id="jump-btn">前往下一页</a>
+    </div>
+
+    <audio id="bg-music" loop>
+        <source src="https://raw.githubusercontent.com/lxy1093924305-tech/mp3/main/%E7%AC%AC%E4%B8%80%E5%8D%95%E5%85%83~1.mp3" type="audio/mpeg">
+        您的浏览器不支持 audio 元素。
+    </audio>
+
+    <script>
+        // --- 1. 音乐控制逻辑 ---
+        const musicBtn = document.getElementById('music-btn');
+        const audio = document.getElementById('bg-music');
+        let isPlaying = false;
+
+        musicBtn.addEventListener('click', () => {
+            if (isPlaying) {
+                audio.pause();
+                musicBtn.classList.remove('playing');
+                // 恢复图标颜色
+                musicBtn.querySelector('svg').style.stroke = "#333";
+            } else {
+                audio.play().catch(e => alert("请先与页面交互以播放音频"));
+                musicBtn.classList.add('playing');
+                // 播放时图标变白
+                musicBtn.querySelector('svg').style.stroke = "#fff";
+            }
+            isPlaying = !isPlaying;
+        });
+
+        // --- 2. 背景图 拖拽 & 缩放 逻辑 (Touch Events) ---
+        const el = document.getElementById('bg-image');
+        
+        let state = {
+            scale: 1,
+            panning: false,
+            pointX: 0,
+            pointY: 0,
+            startX: 0,
+            startY: 0,
+            startDistance: 0
+        };
+
+        // 应用变换函数
+        function setTransform() {
+            el.style.transform = `translate(${state.pointX}px, ${state.pointY}px) scale(${state.scale})`;
+        }
+
+        // 计算两点间距离 (用于双指缩放)
+        function getDistance(touch1, touch2) {
+            const dx = touch1.clientX - touch2.clientX;
+            const dy = touch1.clientY - touch2.clientY;
+            return Math.sqrt(dx * dx + dy * dy);
+        }
+
+        el.addEventListener('touchstart', function(e) {
+            // 阻止默认事件防止页面滚动
+            e.preventDefault(); 
+
+            if (e.touches.length === 1) {
+                // 单指：开始拖拽
+                state.panning = true;
+                state.startX = e.touches[0].clientX - state.pointX;
+                state.startY = e.touches[0].clientY - state.pointY;
+            } else if (e.touches.length === 2) {
+                // 双指：开始缩放
+                state.panning = false; // 双指时不处理拖拽
+                state.startDistance = getDistance(e.touches[0], e.touches[1]);
+            }
+        }, { passive: false });
+
+        el.addEventListener('touchmove', function(e) {
+            e.preventDefault();
+
+            if (e.touches.length === 1 && state.panning) {
+                // 单指移动逻辑
+                state.pointX = e.touches[0].clientX - state.startX;
+                state.pointY = e.touches[0].clientY - state.startY;
+                setTransform();
+            } else if (e.touches.length === 2) {
+                // 双指缩放逻辑
+                const newDistance = getDistance(e.touches[0], e.touches[1]);
+                const zoomFactor = newDistance / state.startDistance;
+                
+                // 限制缩放速度和范围 (0.5倍 到 5倍)
+                let newScale = state.scale * zoomFactor;
+                
+                // 这里做一个简单的处理，每次移动只应用一点点变化，
+                // 或者直接基于 startDistance 计算绝对 scale。
+                // 为了平滑，我们这里简化逻辑：
+                // 实际项目中通常使用 newScale = initialScale * (newDist / initialDist)
+                // 这里我们简化为更新当前 scale 并重置 startDistance
+                
+                state.scale = Math.max(0.5, Math.min(newScale, 5));
+                state.startDistance = newDistance; // 更新距离基准
+                
+                setTransform();
+            }
+        }, { passive: false });
+
+        el.addEventListener('touchend', function(e) {
+            state.panning = false;
+        });
+    </script>
+</body>
+</html>
